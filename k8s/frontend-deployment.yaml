@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: anupsharma/frontend:latest
+          image: anupsharma329/frontend:v0.1.1
           ports:
             - containerPort: 80
           env:

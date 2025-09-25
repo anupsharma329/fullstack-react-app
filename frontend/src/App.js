@@ -4,10 +4,14 @@ function App() {
   const [data, setData] = useState("");
 
   useEffect(() => {
-    fetch("http://localhost:5001/api/data")
+    // Use relative path instead of localhost:5001
+    fetch("/api/data")
       .then((res) => res.json())
       .then((json) => setData(json.message))
-      .catch((err) => console.error(err));
+      .catch((err) => {
+        console.error("API Error:", err);
+        setData("Error fetching data from backend");
+      });
   }, []);
 
   return (

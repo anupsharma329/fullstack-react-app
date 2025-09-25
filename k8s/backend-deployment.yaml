@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: anupsharma/backend:latest
+          image: anupsharma329/backend:v0.1.1
           ports:
             - containerPort: 5001
           env:
@@ -34,7 +34,7 @@ spec:
               cpu: "200m"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health  # Changed from /health to /health
               port: 5001
             initialDelaySeconds: 30
             periodSeconds: 10
@@ -42,7 +42,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health  # Changed from /health to /health
               port: 5001
             initialDelaySeconds: 5
             periodSeconds: 5
