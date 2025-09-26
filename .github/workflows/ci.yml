@@ -9,13 +9,12 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  security-events: write  # Required for SonarCloud
+  security-events: write
 
 env:
   REGISTRY: docker.io
   FRONTEND_IMAGE: anupsharma329/frontend
   BACKEND_IMAGE: anupsharma329/backend
-  # SonarCloud configuration
   SONAR_PROJECT_KEY: anupsharma329_fullstack-react-app
 
 jobs:
@@ -112,9 +111,8 @@ jobs:
             -Dsonar.ci.autoconfig.disabled=true
             ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0} -Dsonar.pullrequest.branch={1} -Dsonar.pullrequest.base={2}', github.event.pull_request.number, github.event.pull_request.head.ref, github.event.pull_request.base.ref) || '' }}
 
-      # FIXED: Quality Gate check - only run on push events to avoid 403 errors
       - name: SonarQube Quality Gate Check
-        if: github.event_name == 'push'  # Only run on push, not PR (fixes 403 error)
+        if: github.event_name == 'push'
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -151,7 +149,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}  # Changed from DOCKERHUB_PASSWORD to DOCKERHUB_TOKEN
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata for Docker
         id: meta
@@ -207,47 +205,48 @@ jobs:
           echo "Backend Image: ${{ env.BACKEND_IMAGE }}:v${{ steps.version.outputs.version }}"
           echo "Semantic Version: v${{ steps.version.outputs.version }}"
 
-  deploy-to-k8s:
-    name: Deploy to Kubernetes
-    needs: [ build-and-push-docker ]
-    if: needs.build-and-test.outputs.should-deploy == 'true' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Get Semantic Version
-        id: version
-        uses: paulhatch/semantic-version@v5.3.0
-        with:
-          tag_prefix: ""
-
-      - name: Set up Kubeconfig
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'v1.29.0'
-
-      - name: Deploy to Kubernetes
-        run: |
-          # Update image versions in Kubernetes manifests
-          sed -i "s|anupsharma329/frontend:.*|anupsharma329/frontend:v${{ steps.version.outputs.version }}|g" k8s/frontend-deployment.yaml
-          sed -i "s|anupsharma329/backend:.*|anupsharma329/backend:v${{ steps.version.outputs.version }}|g" k8s/backend-deployment.yaml
-          
-          # Apply Kubernetes manifests
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/backend-deployment.yaml
-          kubectl apply -f k8s/frontend-deployment.yaml
-          kubectl apply -f k8s/ingress.yaml
-          
-          # Wait for rollout
-          kubectl rollout status deployment/frontend-deployment -n fullstack-app --timeout=300s
-          kubectl rollout status deployment/backend-deployment -n fullstack-app --timeout=300s
-        env:
-          KUBECONFIG: ${{ secrets.KUBECONFIG }}
+  # DISABLED: Kubernetes deployment - enable when you have a real cluster
+  # deploy-to-k8s:
+  #   name: Deploy to Kubernetes
+  #   needs: [ build-and-push-docker ]
+  #   if: needs.build-and-test.outputs.should-deploy == 'true' && github.event_name == 'push' && false
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  # 
+  #     - name: Get Semantic Version
+  #       id: version
+  #       uses: paulhatch/semantic-version@v5.3.0
+  #       with:
+  #         tag_prefix: ""
+  # 
+  #     - name: Set up Kubeconfig
+  #       uses: azure/setup-kubectl@v3
+  #       with:
+  #         version: 'v1.29.0'
+  # 
+  #     - name: Deploy to Kubernetes
+  #       run: |
+  #         # Update image versions in Kubernetes manifests
+  #         sed -i "s|anupsharma329/frontend:.*|anupsharma329/frontend:v${{ steps.version.outputs.version }}|g" k8s/frontend-deployment.yaml
+  #         sed -i "s|anupsharma329/backend:.*|anupsharma329/backend:v${{ steps.version.outputs.version }}|g" k8s/backend-deployment.yaml
+  #         
+  #         # Apply Kubernetes manifests
+  #         kubectl apply -f k8s/namespace.yaml
+  #         kubectl apply -f k8s/backend-deployment.yaml
+  #         kubectl apply -f k8s/frontend-deployment.yaml
+  #         kubectl apply -f k8s/ingress.yaml
+  #         
+  #         # Wait for rollout
+  #         kubectl rollout status deployment/frontend-deployment -n fullstack-app --timeout=300s
+  #         kubectl rollout status deployment/backend-deployment -n fullstack-app --timeout=300s
+  #       env:
+  #         KUBECONFIG: ${{ secrets.KUBECONFIG }}
 
   notify:
     name: Notify Status
-    needs: [ build-and-test, sonar-analysis, build-and-push-docker, deploy-to-k8s ]
+    needs: [ build-and-test, sonar-analysis, build-and-push-docker ]  # Removed deploy-to-k8s
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -257,9 +256,17 @@ jobs:
         with:
           tag_prefix: ""
 
-      - name: Notify Slack/Teams (Optional)
-        if: always()
+      - name: Notify Success
+        if: success()
         run: |
-          echo "CI/CD Pipeline completed for version v${{ steps.version.outputs.version }}"
-          echo "Frontend: ${{ env.FRONTEND_IMAGE }}:v${{ steps.version.outputs.version }}"
-          echo "Backend: ${{ env.BACKEND_IMAGE }}:v${{ steps.version.outputs.version }}"
+          echo "✅ CI/CD Pipeline completed successfully for version v${{ steps.version.outputs.version }}"
+          echo "✅ Frontend: ${{ env.FRONTEND_IMAGE }}:v${{ steps.version.outputs.version }}"
+          echo "✅ Backend: ${{ env.BACKEND_IMAGE }}:v${{ steps.version.outputs.version }}"
+          echo "✅ Docker images pushed to Docker Hub"
+          echo "✅ SonarQube analysis completed"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ CI/CD Pipeline failed for version v${{ steps.version.outputs.version }}"
+          echo "Check the workflow logs for details"
