@@ -1,49 +1,35 @@
 #!/bin/bash
+echo "🚀 Deploying to Local Minikube..."
 
-# Fullstack React App Kubernetes Deployment Script
-set -e
+# Check if Minikube is running
+if ! minikube status >/dev/null 2>&1; then
+    echo "Starting Minikube..."
+    minikube start
+    minikube addons enable ingress
+fi
 
-echo "🚀 Starting Kubernetes deployment..."
+# Set Docker environment to use Minikube's Docker
+eval $(minikube docker-env)
 
-# Create namespace
-echo "📦 Creating namespace..."
-kubectl apply -f namespace.yaml
+echo "📦 Building Docker images locally..."
+docker build -t anupsharma329/backend:local ./backend
+docker build -t anupsharma329/frontend:local ./frontend
 
-# Apply ConfigMap
-echo "⚙️  Applying ConfigMap..."
-kubectl apply -f configmap.yaml
+echo "⚙️ Deploying to Kubernetes..."
+kubectl apply -f k8s/
 
-# Deploy backend
-echo "🔧 Deploying backend..."
-kubectl apply -f backend-deployment.yaml
+echo "⏳ Waiting for deployment to complete..."
+kubectl rollout status deployment/backend-deployment -n fullstack-app --timeout=180s
+kubectl rollout status deployment/frontend-deployment -n fullstack-app --timeout=180s
 
-# Deploy frontend
-echo "🎨 Deploying frontend..."
-kubectl apply -f frontend-deployment.yaml
-
-# Deploy ingress
-echo "🌐 Deploying ingress..."
-kubectl apply -f ingress.yaml
-
-# Deploy HPA
-echo "📈 Deploying Horizontal Pod Autoscalers..."
-kubectl apply -f hpa.yaml
-
-# Wait for deployments to be ready
-echo "⏳ Waiting for deployments to be ready..."
-kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n fullstack-app
-kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n fullstack-app
-
-echo "✅ Deployment completed successfully!"
+echo "🌐 Application URLs:"
+echo "Minikube IP: $(minikube ip)"
+echo "Frontend: http://$(minikube ip):30000"  # Adjust port based on your service
+echo "Backend API: http://$(minikube ip):30001"
 echo ""
-echo "📊 Deployment Status:"
-kubectl get pods -n fullstack-app
-echo ""
-echo "🌐 Services:"
-kubectl get svc -n fullstack-app
-echo ""
-echo "🔗 Ingress:"
-kubectl get ingress -n fullstack-app
-echo ""
-echo "📈 HPA Status:"
-kubectl get hpa -n fullstack-app
+echo "🎯 Quick commands:"
+echo "  minikube service frontend-svc -n fullstack-app --url"
+echo "  kubectl get all -n fullstack-app"
+echo "  kubectl logs -n fullstack-app deployment/frontend-deployment"
+
+echo "✅ Local deployment complete!"
