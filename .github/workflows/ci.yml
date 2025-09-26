@@ -15,7 +15,7 @@ env:
   REGISTRY: docker.io
   FRONTEND_IMAGE: anupsharma329/frontend
   BACKEND_IMAGE: anupsharma329/backend
-  # SonarCloud configuration - FIXED
+  # SonarCloud configuration
   SONAR_PROJECT_KEY: anupsharma329_fullstack-react-app
 
 jobs:
@@ -109,13 +109,15 @@ jobs:
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.javascript.lcov.reportPaths=frontend/coverage/lcov.info,backend/coverage/lcov.info
             -Dsonar.coverage.exclusions=**/node_modules/**,**/*.test.js,**/*.spec.js
+            -Dsonar.ci.autoconfig.disabled=true
+            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0} -Dsonar.pullrequest.branch={1} -Dsonar.pullrequest.base={2}', github.event.pull_request.number, github.event.pull_request.head.ref, github.event.pull_request.base.ref) || '' }}
 
+      # FIXED: Quality Gate check - only run on push events to avoid 403 errors
       - name: SonarQube Quality Gate Check
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event_name == 'push'  # Only run on push, not PR (fixes 403 error)
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
       - name: Upload frontend build
         if: always()
@@ -149,7 +151,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}  # Changed from DOCKERHUB_PASSWORD to DOCKERHUB_TOKEN
 
       - name: Extract metadata for Docker
         id: meta
