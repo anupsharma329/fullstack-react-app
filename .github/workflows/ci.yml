@@ -250,7 +250,7 @@ jobs:
 
       - name: Update Ingress for Minikube
         run: |
-          # Create a temporary ingress file without host for Minikube
+          # Create a corrected ingress file
           cat > k8s/ingress-minikube.yaml << EOF
           apiVersion: networking.k8s.io/v1
           kind: Ingress
@@ -258,7 +258,7 @@ jobs:
             name: app-ingress
             namespace: fullstack-app
             annotations:
-              nginx.ingress.kubernetes.io/rewrite-target: /$1
+              nginx.ingress.kubernetes.io/rewrite-target: /
               nginx.ingress.kubernetes.io/ssl-redirect: "false"
               nginx.ingress.kubernetes.io/proxy-body-size: "10m"
               nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
@@ -273,14 +273,14 @@ jobs:
             rules:
             - http:
                 paths:
-                - path: /api(/|$)(.*)
+                - path: /api
                   pathType: Prefix
                   backend:
                     service:
                       name: backend-svc
                       port:
                         number: 5001
-                - path: /(.*)
+                - path: /
                   pathType: Prefix
                   backend:
                     service:
