@@ -224,79 +224,107 @@ jobs:
 
       - name: Setup Minikube
         run: |
-          # Install Minikube
           curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
           sudo install minikube-linux-amd64 /usr/local/bin/minikube
-          
-          # Install kubectl
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-          
-          # Start Minikube
           minikube start --driver=docker --force
           minikube addons enable ingress
 
-      - name: Deploy to Minikube
+      - name: Wait for Ingress Controller
         run: |
-          # Update image versions in Kubernetes manifests to use the newly built version
+          echo "Waiting for ingress controller to be ready..."
+          # Wait for ingress-nginx namespace
+          until kubectl get namespace ingress-nginx >/dev/null 2>&1; do
+            sleep 5
+          done
+          
+          # Wait for ingress controller pods
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=180s
+          
+          # Additional wait for webhook service
+          sleep 30
+
+      - name: Update Ingress for Minikube
+        run: |
+          # Create a temporary ingress file without host for Minikube
+          cat > k8s/ingress-minikube.yaml << EOF
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: app-ingress
+            namespace: fullstack-app
+            annotations:
+              nginx.ingress.kubernetes.io/rewrite-target: /$1
+              nginx.ingress.kubernetes.io/ssl-redirect: "false"
+              nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+              nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+              nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+              nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+              nginx.ingress.kubernetes.io/enable-cors: "true"
+              nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+              nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+              nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+          spec:
+            ingressClassName: nginx
+            rules:
+            - http:
+                paths:
+                - path: /api(/|$)(.*)
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: backend-svc
+                      port:
+                        number: 5001
+                - path: /(.*)
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: frontend-svc
+                      port:
+                        number: 80
+          EOF
+
+      - name: Deploy Application
+        run: |
+          # Update image versions
           sed -i "s|anupsharma329/frontend:.*|anupsharma329/frontend:v${{ steps.version.outputs.version }}|g" k8s/frontend-deployment.yaml
           sed -i "s|anupsharma329/backend:.*|anupsharma329/backend:v${{ steps.version.outputs.version }}|g" k8s/backend-deployment.yaml
           
-          # Apply Kubernetes manifests
+          # Apply manifests (use the modified ingress)
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/backend-deployment.yaml
           kubectl apply -f k8s/frontend-deployment.yaml
-          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f k8s/ingress-minikube.yaml
           
           # Wait for rollout
           kubectl rollout status deployment/frontend-deployment -n fullstack-app --timeout=300s
           kubectl rollout status deployment/backend-deployment -n fullstack-app --timeout=300s
           
           # Get application URLs
-          echo "Application deployed to Minikube!"
-          echo "Minikube IP: $(minikube ip)"
-          echo "Frontend URL: http://$(minikube ip):30000"  # Adjust based on your service type
-          echo "To access: minikube service frontend-svc -n fullstack-app --url"
+          echo "🎯 Application deployed successfully!"
+          MINIKUBE_IP=$(minikube ip)
+          echo "🌐 Minikube IP: $MINIKUBE_IP"
+          echo "🔗 Frontend URL: http://$MINIKUBE_IP"
+          echo "🔗 Backend API: http://$MINIKUBE_IP/api"
+          echo ""
+          echo "💡 To test: curl http://$MINIKUBE_IP/api/data"
 
-      - name: Basic Smoke Test
+      - name: Test Application
         run: |
-          # Wait a bit for services to be ready
+          # Wait for application to be ready
           sleep 30
           
-          # Port forward and test backend
-          timeout 10s kubectl port-forward -n fullstack-app svc/backend-svc 5001:5001 &
-          sleep 5
-          curl -f http://localhost:5001/api/data || echo "Backend test failed but continuing"
+          MINIKUBE_IP=$(minikube ip)
           
-          # Port forward and test frontend
-          timeout 10s kubectl port-forward -n fullstack-app svc/frontend-svc 8080:80 &
-          sleep 5
-          curl -f http://localhost:8080 || echo "Frontend test failed but continuing"
-
-  notify:
-    name: Notify Status
-    needs: [ build-and-test, sonar-analysis, build-and-push-docker, deploy-to-minikube ]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Get Semantic Version
-        id: version
-        uses: paulhatch/semantic-version@v5.3.0
-        with:
-          tag_prefix: ""
-
-      - name: Notify Success
-        if: success()
-        run: |
-          echo "✅ CI/CD Pipeline completed successfully for version v${{ steps.version.outputs.version }}"
-          echo "✅ Frontend: ${{ env.FRONTEND_IMAGE }}:v${{ steps.version.outputs.version }}"
-          echo "✅ Backend: ${{ env.BACKEND_IMAGE }}:v${{ steps.version.outputs.version }}"
-          echo "✅ Docker images pushed to Docker Hub"
-          echo "✅ SonarQube analysis completed"
-          echo "✅ Application deployed to Minikube"
-
-      - name: Notify Failure
-        if: failure()
-        run: |
-          echo "❌ CI/CD Pipeline failed for version v${{ steps.version.outputs.version }}"
-          echo "Check the workflow logs for details"
+          # Test backend API
+          echo "Testing backend API..."
+          curl -f "http://$MINIKUBE_IP/api/data" || echo "Backend test failed"
+          
+          # Test frontend
+          echo "Testing frontend..."
+          curl -f "http://$MINIKUBE_IP" || echo "Frontend test failed"
