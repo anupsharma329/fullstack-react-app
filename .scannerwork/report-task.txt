@@ -1,0 +1,7 @@
+organization=anupsharma329
+projectKey=fullstack-react-app
+serverUrl=https://sonarcloud.io
+serverVersion=8.0.0.67753
+dashboardUrl=https://sonarcloud.io/dashboard?id=fullstack-react-app
+ceTaskId=AZmFBGrz7wOUv6wQKpCe
+ceTaskUrl=https://sonarcloud.io/api/ce/task?id=AZmFBGrz7wOUv6wQKpCe
