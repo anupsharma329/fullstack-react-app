@@ -16,6 +16,7 @@ env:
   FRONTEND_IMAGE: anupsharma329/frontend
   BACKEND_IMAGE: anupsharma329/backend
   SONAR_PROJECT_KEY: anupsharma329_fullstack-react-app
+  EC2_HOST: "107.21.172.106"  # Your EC2 IP
 
 jobs:
   build-and-test:
@@ -205,8 +206,8 @@ jobs:
           echo "Backend Image: ${{ env.BACKEND_IMAGE }}:v${{ steps.version.outputs.version }}"
           echo "Semantic Version: v${{ steps.version.outputs.version }}"
 
-  deploy-to-minikube:
-    name: Deploy to Minikube (Local)
+  deploy-to-ec2:
+    name: 🚀 Deploy to EC2 Production
     needs: [ build-and-push-docker ]
     if: needs.build-and-test.outputs.should-deploy == 'true' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -222,109 +223,93 @@ jobs:
           major_pattern: "BREAKING CHANGE:"
           minor_pattern: "feat:"
 
-      - name: Setup Minikube
-        run: |
-          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-          sudo install minikube-linux-amd64 /usr/local/bin/minikube
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-          minikube start --driver=docker --force
-          minikube addons enable ingress
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "🚀 Starting deployment to EC2..."
+            echo "Deploying version: v${{ steps.version.outputs.version }}"
+            
+            # Navigate to app directory
+            cd ~/fullstack-app
+            
+            # Pull latest Docker images
+            echo "📥 Pulling latest images..."
+            docker-compose pull
+            
+            # Stop and start with new images
+            echo "🔄 Restarting application..."
+            docker-compose down
+            docker-compose up -d
+            
+            # Wait for services to start
+            echo "⏳ Waiting for services to start..."
+            sleep 15
+            
+            # Health checks
+            echo "🏥 Running health checks..."
+            
+            # Check backend
+            if curl -s http://localhost:5001/api/data > /dev/null; then
+              echo "✅ Backend is healthy"
+            else
+              echo "❌ Backend health check failed"
+              docker logs backend
+              exit 1
+            fi
+            
+            # Check frontend
+            if curl -s http://localhost > /dev/null; then
+              echo "✅ Frontend is healthy"
+            else
+              echo "❌ Frontend health check failed"
+              docker logs frontend
+              exit 1
+            fi
+            
+            # Show deployment info
+            echo "🎉 Deployment successful!"
+            echo "🌐 Frontend: http://${{ env.EC2_HOST }}"
+            echo "🔗 Backend API: http://${{ env.EC2_HOST }}:5001/api/data"
+            echo "📊 Running containers:"
+            docker ps
 
-      - name: Wait for Ingress Controller
+      - name: Notification
+        if: success()
         run: |
-          echo "Waiting for ingress controller to be ready..."
-          # Wait for ingress-nginx namespace
-          until kubectl get namespace ingress-nginx >/dev/null 2>&1; do
-            sleep 5
-          done
-          
-          # Wait for ingress controller pods
-          kubectl wait --namespace ingress-nginx \
-            --for=condition=ready pod \
-            --selector=app.kubernetes.io/component=controller \
-            --timeout=180s
-          
-          # Additional wait for webhook service
-          sleep 30
+          echo "🚀 Production deployment completed successfully!"
+          echo "🌐 Your application is live at: http://${{ env.EC2_HOST }}"
+          echo "🔗 Backend API: http://${{ env.EC2_HOST }}:5001/api/data"
+          echo "📈 Version: v${{ needs.build-and-push-docker.outputs.version }}"
 
-      - name: Update Ingress for Minikube
-        run: |
-          # Create a corrected ingress file
-          cat > k8s/ingress-minikube.yaml << EOF
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: app-ingress
-            namespace: fullstack-app
-            annotations:
-              nginx.ingress.kubernetes.io/rewrite-target: /
-              nginx.ingress.kubernetes.io/ssl-redirect: "false"
-              nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-              nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
-              nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
-              nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
-              nginx.ingress.kubernetes.io/enable-cors: "true"
-              nginx.ingress.kubernetes.io/cors-allow-origin: "*"
-              nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
-              nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
-          spec:
-            ingressClassName: nginx
-            rules:
-            - http:
-                paths:
-                - path: /api
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: backend-svc
-                      port:
-                        number: 5001
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: frontend-svc
-                      port:
-                        number: 80
-          EOF
+  notify:
+    name: Notify Status
+    needs: [ build-and-test, sonar-analysis, build-and-push-docker, deploy-to-ec2 ]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Semantic Version
+        id: version
+        uses: paulhatch/semantic-version@v5.3.0
+        with:
+          tag_prefix: ""
 
-      - name: Deploy Application
+      - name: Notify Success
+        if: success()
         run: |
-          # Update image versions
-          sed -i "s|anupsharma329/frontend:.*|anupsharma329/frontend:v${{ steps.version.outputs.version }}|g" k8s/frontend-deployment.yaml
-          sed -i "s|anupsharma329/backend:.*|anupsharma329/backend:v${{ steps.version.outputs.version }}|g" k8s/backend-deployment.yaml
-          
-          # Apply manifests (use the modified ingress)
-          kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/backend-deployment.yaml
-          kubectl apply -f k8s/frontend-deployment.yaml
-          kubectl apply -f k8s/ingress-minikube.yaml
-          
-          # Wait for rollout
-          kubectl rollout status deployment/frontend-deployment -n fullstack-app --timeout=300s
-          kubectl rollout status deployment/backend-deployment -n fullstack-app --timeout=300s
-          
-          # Get application URLs
-          echo "🎯 Application deployed successfully!"
-          MINIKUBE_IP=$(minikube ip)
-          echo "🌐 Minikube IP: $MINIKUBE_IP"
-          echo "🔗 Frontend URL: http://$MINIKUBE_IP"
-          echo "🔗 Backend API: http://$MINIKUBE_IP/api"
-          echo ""
-          echo "💡 To test: curl http://$MINIKUBE_IP/api/data"
+          echo "✅ CI/CD Pipeline completed successfully!"
+          echo "📦 Version: v${{ steps.version.outputs.version }}"
+          echo "🌐 Production URL: http://${{ env.EC2_HOST }}"
+          echo "🔗 Backend API: http://${{ env.EC2_HOST }}:5001/api/data"
+          echo "📊 SonarQube analysis: Complete"
+          echo "🐳 Docker images: Updated"
 
-      - name: Test Application
+      - name: Notify Failure
+        if: failure()
         run: |
-          # Wait for application to be ready
-          sleep 30
-          
-          MINIKUBE_IP=$(minikube ip)
-          
-          # Test backend API
-          echo "Testing backend API..."
-          curl -f "http://$MINIKUBE_IP/api/data" || echo "Backend test failed"
-          
-          # Test frontend
-          echo "Testing frontend..."
-          curl -f "http://$MINIKUBE_IP" || echo "Frontend test failed"
+          echo "❌ CI/CD Pipeline failed"
+          echo "📦 Version: v${{ steps.version.outputs.version }}"
+          echo "🔍 Check the workflow logs for details"
