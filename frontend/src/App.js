@@ -10,7 +10,7 @@ function App() {
       .then((json) => setData(json.message))
       .catch((err) => {
         console.error("API Error:", err);
-        setData("Error fetching data from backend");
+        setData("this is anupsharma frontend");
       });
   }, []);
 

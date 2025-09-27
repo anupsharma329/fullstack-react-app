@@ -1,10 +1,14 @@
-name: CI with SonarQube and Docker
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main", "master", "docker" ]
+    branches: [ "main", "master" ]  # Auto-deploy to EC2
   pull_request:
-    branches: [ "main", "master", "docker" ]
+    branches: [ "main", "master", "docker" ]  # Test PRs to any branch
+
+env:
+  EC2_HOST: "107.21.172.106"
+
 
 permissions:
   contents: read
