@@ -16,7 +16,7 @@ app.get("/health", (req, res) => {
 });
 
 app.get("/api/data", (req, res) => {
-  res.json({ message: "Hello from backend! (no DB)" });
+  res.json({ message: "Hello from anupsharma backend! " });
 });
 
 app.get("/api/status", (req, res) => {
