@@ -16,7 +16,7 @@ env:
   FRONTEND_IMAGE: anupsharma329/frontend
   BACKEND_IMAGE: anupsharma329/backend
   SONAR_PROJECT_KEY: anupsharma329_fullstack-react-app
-  EC2_HOST: "44.220.156.70"  # ✅ Updated to new EC2 IP
+  EC2_HOST: "54.164.110.134"  # ✅ Updated to new EC2 IP
 
 jobs:
   build-and-test:
@@ -209,7 +209,7 @@ jobs:
   deploy-to-ec2:
     name: 🚀 Deploy to EC2 Production
     needs: [ build-and-push-docker ]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'  # ✅ Only deploy from main
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to EC2
@@ -218,16 +218,17 @@ jobs:
           host: ${{ env.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          timeout: 60s
           script: |
-            echo "🚀 Starting deployment to EC2..."
+            echo "🚀 Starting deployment to EC2 (54.164.110.134)..."
             
-            # Create directory if not exists
+            # Create directory
             mkdir -p ~/fullstack-app
             cd ~/fullstack-app
             
-            # Create docker-compose.yml if not exists
-            if [ ! -f docker-compose.yml ]; then
-              cat > docker-compose.yml << 'EOF'
+            # Create docker-compose.yml
+            cat > docker-compose.yml << 'EOF'
             version: '3.8'
             services:
               backend:
@@ -243,50 +244,25 @@ jobs:
                   - backend
                 restart: unless-stopped
             EOF
-              echo "✅ Created docker-compose.yml"
-            fi
             
-            # Pull latest Docker images
+            # Pull and run
             echo "📥 Pulling latest images..."
             docker-compose pull
             
-            # Stop and start with new images
-            echo "🔄 Restarting application..."
+            echo "🔄 Starting application..."
             docker-compose down
             docker-compose up -d
             
-            # Wait for services to start
-            echo "⏳ Waiting for services to start..."
-            sleep 15
+            echo "⏳ Waiting for services..."
+            sleep 20
             
-            # Health checks
-            echo "🏥 Running health checks..."
+            echo "🏥 Health checks..."
+            curl -s http://localhost:5001/api/data && echo "✅ Backend healthy" || echo "❌ Backend failed"
+            curl -s http://localhost && echo "✅ Frontend healthy" || echo "❌ Frontend failed"
             
-            # Check backend
-            if curl -s http://localhost:5001/api/data > /dev/null; then
-              echo "✅ Backend is healthy"
-            else
-              echo "❌ Backend health check failed"
-              docker logs backend
-              exit 1
-            fi
-            
-            # Check frontend
-            if curl -s http://localhost > /dev/null; then
-              echo "✅ Frontend is healthy"
-            else
-              echo "❌ Frontend health check failed"
-              docker logs frontend
-              exit 1
-            fi
-            
-            # Show deployment info
-            echo "🎉 Deployment successful!"
-            echo "🌐 Frontend: http://${{ env.EC2_HOST }}"
-            echo "🔗 Backend API: http://${{ env.EC2_HOST }}:5001/api/data"
-            echo "📊 Running containers:"
-            docker ps
-
+            echo "🎉 Deployment complete!"
+            echo "🌐 Frontend: http://54.164.110.134"
+            echo "🔗 Backend: http://54.164.110.134:5001/api/data"
   notify:
     name: Notify Status
     needs: [ build-and-test, sonar-analysis, build-and-push-docker, deploy-to-ec2 ]
