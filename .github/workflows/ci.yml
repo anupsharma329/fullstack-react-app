@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [ "main", "master", "docker" ]  # Test PRs to any branch
 
-env:
-  EC2_HOST: "107.21.172.106"
-
-
 permissions:
   contents: read
   pull-requests: read
@@ -20,7 +16,7 @@ env:
   FRONTEND_IMAGE: anupsharma329/frontend
   BACKEND_IMAGE: anupsharma329/backend
   SONAR_PROJECT_KEY: anupsharma329_fullstack-react-app
-  EC2_HOST: "107.21.172.106"  # Your EC2 IP
+  EC2_HOST: "44.220.156.70"  # ✅ Updated to new EC2 IP
 
 jobs:
   build-and-test:
@@ -51,7 +47,7 @@ jobs:
       - name: Check if should deploy
         id: check-branch
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" || "${{ github.ref }}" == "refs/heads/docker" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" ]]; then
             echo "should-deploy=true" >> $GITHUB_OUTPUT
           else
             echo "should-deploy=false" >> $GITHUB_OUTPUT
@@ -213,20 +209,9 @@ jobs:
   deploy-to-ec2:
     name: 🚀 Deploy to EC2 Production
     needs: [ build-and-push-docker ]
-    if: needs.build-and-test.outputs.should-deploy == 'true' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'  # ✅ Only deploy from main
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Get Semantic Version
-        id: version
-        uses: paulhatch/semantic-version@v5.3.0
-        with:
-          tag_prefix: ""
-          major_pattern: "BREAKING CHANGE:"
-          minor_pattern: "feat:"
-
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -235,10 +220,31 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             echo "🚀 Starting deployment to EC2..."
-            echo "Deploying version: v${{ steps.version.outputs.version }}"
             
-            # Navigate to app directory
+            # Create directory if not exists
+            mkdir -p ~/fullstack-app
             cd ~/fullstack-app
+            
+            # Create docker-compose.yml if not exists
+            if [ ! -f docker-compose.yml ]; then
+              cat > docker-compose.yml << 'EOF'
+            version: '3.8'
+            services:
+              backend:
+                image: anupsharma329/backend:latest
+                ports:
+                  - "5001:5001"
+                restart: unless-stopped
+              frontend:
+                image: anupsharma329/frontend:latest
+                ports:
+                  - "80:80"
+                depends_on:
+                  - backend
+                restart: unless-stopped
+            EOF
+              echo "✅ Created docker-compose.yml"
+            fi
             
             # Pull latest Docker images
             echo "📥 Pulling latest images..."
@@ -280,14 +286,6 @@ jobs:
             echo "🔗 Backend API: http://${{ env.EC2_HOST }}:5001/api/data"
             echo "📊 Running containers:"
             docker ps
-
-      - name: Notification
-        if: success()
-        run: |
-          echo "🚀 Production deployment completed successfully!"
-          echo "🌐 Your application is live at: http://${{ env.EC2_HOST }}"
-          echo "🔗 Backend API: http://${{ env.EC2_HOST }}:5001/api/data"
-          echo "📈 Version: v${{ needs.build-and-push-docker.outputs.version }}"
 
   notify:
     name: Notify Status
