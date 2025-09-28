@@ -20,7 +20,7 @@ app.get("/api/data", (req, res) => {
 });
 
 app.get("/api/status", (req, res) => {
-  res.send("Backend is up. Try /api/data for DB message.");
+  res.send("Anup SharmaBackend is up. Try /api/data for DB message.");
 });
 
 app.listen(PORT, () => {
